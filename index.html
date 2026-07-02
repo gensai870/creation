@@ -116,6 +116,41 @@
   .flow .here{color:var(--signal);font-weight:800}
   footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;font-size:11px;color:var(--sub)}
   .err{color:var(--signal);font-size:12px;font-weight:700;margin-top:6px;min-height:16px}
+
+  /* 最新チェックUI */
+  .freshness-panel{
+    margin-top:20px;border-radius:var(--radius);overflow:hidden;
+    border:1px solid var(--line);
+  }
+  .freshness-header{
+    display:flex;align-items:center;gap:10px;padding:11px 14px;
+    background:var(--field);border-bottom:1px solid var(--line);
+    font-size:12.5px;font-weight:700;
+  }
+  .freshness-header .dot{
+    width:10px;height:10px;border-radius:50%;flex:0 0 10px;
+  }
+  .dot-checking{background:#94a3b8;animation:pulse 1.2s infinite}
+  .dot-ok{background:var(--ok)}
+  .dot-warn{background:var(--draft)}
+  .dot-alert{background:var(--signal)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  .freshness-body{padding:12px 14px;font-size:12.5px;line-height:1.7}
+  .freshness-body ul{margin:6px 0 0;padding-left:18px}
+  .freshness-body li{margin-bottom:4px}
+  .freshness-body .src-ok{color:var(--ok);font-weight:700}
+  .freshness-body .src-warn{color:var(--draft);font-weight:700}
+  .freshness-body .src-alert{color:var(--signal);font-weight:700}
+  .freshness-body .src-url{font-size:11px;color:var(--sub);word-break:break-all}
+
+  .check-summary{
+    margin-top:10px;padding:8px 11px;border-radius:4px;
+    font-size:12px;font-weight:700;
+  }
+  .check-summary.ok{background:var(--ok-soft);color:var(--ok)}
+  .check-summary.warn{background:var(--draft-soft);color:var(--draft)}
+  .check-summary.alert{background:var(--signal-soft);color:var(--signal)}
 </style>
 </head>
 <body>
@@ -233,6 +268,22 @@
       <div class="actions" id="outActions" style="display:none">
         <button id="copy">JSONをコピー</button>
         <button class="ghost" id="download">.json を保存</button>
+      </div>
+
+      <!-- 最新チェックパネル -->
+      <div id="freshnessWrap" style="display:none">
+        <div style="margin-top:22px;font-size:13px;font-weight:800;margin-bottom:8px">
+          📡 データ最新性チェック
+        </div>
+        <div class="freshness-panel">
+          <div class="freshness-header" id="freshnessHeader">
+            <span class="dot dot-checking" id="freshnessDot"></span>
+            <span id="freshnessTitle">公式ソースを確認中…</span>
+          </div>
+          <div class="freshness-body" id="freshnessBody">
+            <span style="color:var(--sub)">Claude が内閣府・都道府県の被害想定ソースを照合しています。</span>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -365,6 +416,140 @@
     a.href=url; a.download="disaster_deck_"+slug+".json"; a.click();
     URL.revokeObjectURL(url);
   });
+
+  // ── 最新チェック（Claude API）──────────────────────────────
+  function setFreshnessState(state, title){
+    var dot=$("freshnessDot"), hdr=$("freshnessTitle");
+    dot.className="dot";
+    if(state==="checking"){ dot.classList.add("dot-checking"); }
+    else if(state==="ok"){  dot.classList.add("dot-ok"); }
+    else if(state==="warn"){ dot.classList.add("dot-warn"); }
+    else if(state==="alert"){ dot.classList.add("dot-alert"); }
+    hdr.textContent=title;
+  }
+
+  function renderFreshnessResult(data){
+    // data: { overall, sources:[{name,version,url,status,note}], summary, slide_text }
+    var overall = data.overall || "warn";
+    var titleMap = {ok:"✅ 最新データ確認済み", warn:"⚠️ 一部要確認", alert:"🚨 更新データあり・要修正"};
+    setFreshnessState(overall, titleMap[overall] || "確認完了");
+
+    var html = "";
+
+    if(data.sources && data.sources.length){
+      html += "<ul>";
+      data.sources.forEach(function(s){
+        var cls = s.status==="ok" ? "src-ok" : s.status==="alert" ? "src-alert" : "src-warn";
+        var icon = s.status==="ok" ? "✓" : s.status==="alert" ? "!" : "△";
+        html += "<li><span class='"+cls+"'>["+icon+"] "+s.name+"</span>";
+        if(s.version) html += " — <strong>"+s.version+"</strong>";
+        if(s.note) html += "<br><span style='color:var(--sub)'>"+s.note+"</span>";
+        if(s.url) html += "<br><span class='src-url'>"+s.url+"</span>";
+        html += "</li>";
+      });
+      html += "</ul>";
+    }
+
+    if(data.slide_text){
+      html += "<details style='margin-top:10px'><summary style='cursor:pointer;font-size:12px;color:var(--sub)'>スライド用修正テキスト案を表示</summary>";
+      html += "<pre style='margin-top:8px;font-size:11.5px;white-space:pre-wrap;background:var(--field);color:var(--ink);padding:10px;border-radius:4px;border:1px solid var(--line)'>"+data.slide_text+"</pre></details>";
+    }
+
+    if(data.summary){
+      html += "<div class='check-summary "+overall+"'>"+data.summary+"</div>";
+    }
+
+    $("freshnessBody").innerHTML = html;
+
+    // JSONのsourcesフィールドも更新
+    if(lastJSON && data.sources){
+      lastJSON.sources = data.sources.map(function(s){
+        return {name:s.name, version:s.version||"", url:s.url||"", status:s.status, note:s.note||""};
+      });
+      lastJSON.data_freshness = { checked_at: new Date().toISOString(), overall: overall };
+    }
+  }
+
+  async function runFreshnessCheck(pref, city){
+    $("freshnessWrap").style.display="block";
+    setFreshnessState("checking","公式ソースを確認中…");
+    $("freshnessBody").innerHTML="<span style='color:var(--sub)'>Claude が内閣府・都道府県の被害想定バージョンを照合しています…</span>";
+
+    var prompt = [
+      "あなたは日本の防災・減災資料を作成するAIです。",
+      "以下の地域の防災スライド作成にあたり、参照すべき公式の被害想定ソースが最新かどうかを確認してください。",
+      "",
+      "地域：" + pref + " " + city,
+      "確認日：" + new Date().toLocaleDateString("ja-JP"),
+      "",
+      "以下の観点で確認し、JSON形式のみで回答してください（```や前置き文は不要）:",
+      "1. 内閣府・中央防災会議の首都直下地震または当該地域の被害想定（最新版の名称・公表年月）",
+      "2. 都道府県の地域防災計画・被害想定（最新版の名称・公表年月）",
+      "3. 現在よく使われているが古くなっている想定があれば警告",
+      "4. スライドに記載すべき地震名称・震度の修正案（あれば）",
+      "",
+      "返答フォーマット（JSONのみ）:",
+      "{",
+      '  "overall": "ok" | "warn" | "alert",',
+      '  "sources": [',
+      '    { "name": "ソース名", "version": "令和X年X月版", "url": "https://...", "status": "ok"|"warn"|"alert", "note": "補足" }',
+      "  ],",
+      '  "summary": "一言まとめ（日本語）",',
+      '  "slide_text": "スライドに使える修正テキスト案（該当する場合のみ、なければ空文字）"',
+      "}"
+    ].join("\n");
+
+    try {
+      var res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1000,
+          tools:[{ type:"web_search_20250305", name:"web_search" }],
+          messages:[{ role:"user", content: prompt }]
+        })
+      });
+      var data = await res.json();
+
+      // テキストブロックを結合
+      var raw = (data.content||[])
+        .filter(function(b){ return b.type==="text"; })
+        .map(function(b){ return b.text; })
+        .join("");
+
+      // JSON部分を抽出
+      var clean = raw.replace(/```json|```/g,"").trim();
+      var firstBrace = clean.indexOf("{");
+      var lastBrace  = clean.lastIndexOf("}");
+      if(firstBrace>=0 && lastBrace>firstBrace){
+        clean = clean.slice(firstBrace, lastBrace+1);
+      }
+      var parsed = JSON.parse(clean);
+      renderFreshnessResult(parsed);
+
+    } catch(e){
+      setFreshnessState("warn","チェック中にエラーが発生しました");
+      $("freshnessBody").innerHTML =
+        "<span style='color:var(--sub)'>APIへのアクセスに失敗しました。手動で最新の被害想定ソースをご確認ください。<br>" +
+        "内閣府：<a href='https://www.bousai.go.jp/jishin/syuto/' target='_blank' style='color:var(--signal)'>首都直下地震対策ページ</a><br>" +
+        "東京都：<a href='https://www.bousai.metro.tokyo.lg.jp/taisaku/torikumi/1000902/1021571.html' target='_blank' style='color:var(--signal)'>被害想定ページ</a>" +
+        "</span>";
+    }
+  }
+
+  // generate() に最新チェックを連携
+  var origGenerate = generate;
+  generate = function(){
+    origGenerate();
+    if(lastJSON){
+      var p=$("pref").value.trim(), c=$("city").value.trim();
+      if(p && c) runFreshnessCheck(p, c);
+    }
+  };
+  $("gen").removeEventListener("click", origGenerate);
+  $("gen").addEventListener("click", generate);
+
 })();
 </script>
 </body>
