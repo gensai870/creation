@@ -184,7 +184,10 @@
       <p class="lead">講演の基本情報を入力</p>
 
       <label>講演タイトル<span class="req">*</span></label>
-      <input id="title" placeholder="例：保育施設のための地震・津波対応" />
+      <input id="title" placeholder="例：藍住町の未来を守る勉強会" />
+
+      <label>サブタイトル（任意）</label>
+      <input id="subtitle" placeholder="例：これまでの防災を変える「減災」の視点" />
 
       <div class="row2">
         <div>
@@ -440,6 +443,7 @@
     return {
       meta: {
         title: $("title").value.trim(),
+        subtitle: $("subtitle").value.trim(),
         date: $("date").value || "",
         duration_min: Number($("duration").value),
         audience: audienceKeys,
@@ -565,6 +569,7 @@
 
   $("sample").addEventListener("click", function(){
     $("title").value="保育施設のための地震・津波対応 減災講演";
+    $("subtitle").value="これまでの防災を変える「減災」の視点";
     $("date").value="";
     $("duration").value="60";
     $("pref").value="静岡県";
@@ -579,7 +584,7 @@
   });
 
   $("clear").addEventListener("click", function(){
-    ["title","date","pref","city","venue","address","buildingName","sponsorName"].forEach(function(id){$(id).value="";});
+    ["title","subtitle","date","pref","city","venue","address","buildingName","sponsorName"].forEach(function(id){$(id).value="";});
     $("duration").value="60"; setAudienceChecks(["general"]); $("template").value="standard";
     $("err").textContent="";
     $("output").innerHTML='<div class="empty">左のフォームを入力し「調査JSONを生成」を押すと、ここに防災データ構造のドラフトが表示されます。</div>';
@@ -625,13 +630,15 @@
     lines.push("");
     lines.push("【埋めてほしいプレースホルダー一覧】");
     lines.push("- {{REGION_NAME}} … 地域名（" + (json.location.city || json.location.prefecture || "") + "）");
+    lines.push("- {{EVENT_TITLE}} … 講演タイトル（" + json.meta.title + "）");
+    lines.push("- {{EVENT_SUBTITLE}} … サブタイトル（" + (json.meta.subtitle || "") + "）");
     lines.push("- {{AUDIENCE_LABEL_LIST}} … 対象者の表示名（" + sp.layer2_audience_variant.variants.map(function(v){return v.audience_label;}).join("／") + "）");
     lines.push("- {{DATE}} / {{VENUE_NAME}} … 開催日・会場名");
-    lines.push("- {{LECTURES}} / {{PARTICIPANTS}} / {{PREFECTURES}} … 最新の活動実績数値（要確認）");
-    lines.push("- {{REGION_EARTHQUAKE_CONTENT}} … 想定されている地震（layer3_region_variant.region_earthquake）");
-    lines.push("- {{REGION_DAMAGE_CONTENT}} … 想定される被害（region_damage）");
+    lines.push("- {{RECENT_AREAS}} … 最近の実施エリア一覧（要確認）");
+    lines.push("- {{EDUCATORS}} / {{CAREGIVERS}} / {{CHILDREN}} / {{OTHERS}} … 対象者別のこれまでの累計人数（教育者／保育者／こども／PTA・企業他、要確認）");
+    lines.push("- {{REGION_EARTHQUAKE_CONTENT}} … 想定されている地震（layer3_region_variant.region_earthquake。全国地震予想データ上の会場マーカー位置、想定地震名・M・想定死者数・震度・揺れの継続時間、活断層/プレート情報を含む）");
+    lines.push("- {{REGION_DAMAGE_CONTENT}} … 想定される被害（region_damage。建物全壊・半壊棟数、死者数の時間帯／季節別内訳など自治体公表の詳細数値）");
     lines.push("- {{REGION_HAZARDMAP_IMAGE}} … ハザードマップの案内文（画像自体は人が別途スクショで貼付）");
-    lines.push("- {{REGION_STRATEGY_CONTENT}} … 自治体の地震戦略・行動計画（region_strategy）");
     if (sp.layer3_region_variant.venue_specific.enabled){
       lines.push("- {{VENUE_NAME}} / {{VENUE_SPECIFIC_CONTENT}} … 会場固有の被害想定（会場名："+sp.layer3_region_variant.venue_specific.building_name+"）");
     } else {
