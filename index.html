@@ -78,6 +78,14 @@
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
   @media(max-width:520px){.row2,.row3{grid-template-columns:1fr}}
   .hint{font-size:11px;color:var(--sub);margin-top:4px}
+  .check-grid{display:flex;flex-wrap:wrap;gap:8px}
+  .check-chip{
+    display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+    padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:var(--field);
+    cursor:pointer;user-select:none;
+  }
+  .check-chip input{width:auto;margin:0;accent-color:var(--signal)}
+  .check-chip:has(input:checked){border-color:var(--signal);background:var(--signal-soft);color:var(--signal)}
 
   .actions{display:flex;gap:10px;margin-top:24px;flex-wrap:wrap}
   button{
@@ -211,21 +219,21 @@
       <input id="address" placeholder="例：静岡県静岡市葵区◯◯1-2-3" />
       <p class="hint">住所はジオコーディングの入力になります（MVPでは緯度経度は空欄でJSON出力）。</p>
 
+      <label>対象</label>
+      <div class="check-grid" id="audienceGroup">
+        <label class="check-chip"><input type="checkbox" name="audience" value="childcare" checked>保育者（保育士・幼稚園教諭）</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="teacher">教員（小中高）</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="student">学生（事前学習シート形式）</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="parent">保護者</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="corporate">企業（BCP特化）</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="construction">建設業</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="assembly">議会・行政</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="special_needs">特別支援学校</label>
+        <label class="check-chip"><input type="checkbox" name="audience" value="general">一般</label>
+      </div>
+      <p class="hint">複数選択できます（例：保育者＋保護者が同時に参加する講演会など）。選択した対象ごとの理論パートがすべて生成対象に含まれます。</p>
+
       <div class="row2">
-        <div>
-          <label>対象（audience_variant）</label>
-          <select id="audience">
-            <option value="childcare" selected>保育者（保育士・幼稚園教諭）</option>
-            <option value="teacher">教員（小中高）</option>
-            <option value="student">学生（事前学習シート形式）</option>
-            <option value="parent">保護者</option>
-            <option value="corporate">企業（BCP特化）</option>
-            <option value="construction">建設業</option>
-            <option value="assembly">議会・行政</option>
-            <option value="special_needs">特別支援学校</option>
-            <option value="general">一般</option>
-          </select>
-        </div>
         <div>
           <label>テンプレート</label>
           <select id="template">
@@ -393,19 +401,44 @@
     }
   };
 
+  function getSelectedAudiences(){
+    var boxes = document.querySelectorAll('input[name="audience"]:checked');
+    var vals = [];
+    for (var i=0; i<boxes.length; i++){ vals.push(boxes[i].value); }
+    return vals.length ? vals : ["general"];
+  }
+
   function buildJSON(){
     var status = function(){return {state:"draft", needs_review:true};};
-    var audienceKey = $("audience").value;
-    var audienceInfo = AUDIENCE_VARIANT_MAP[audienceKey] || AUDIENCE_VARIANT_MAP.general;
+    var audienceKeys = getSelectedAudiences();
     var buildingName = $("buildingName").value.trim();
     var sponsorName = $("sponsorName").value.trim();
+
+    var variants = audienceKeys.map(function(key){
+      var info = AUDIENCE_VARIANT_MAP[key] || AUDIENCE_VARIANT_MAP.general;
+      return {
+        audience_type: key,
+        audience_label: info.label,
+        duty_of_care_position: info.duty_of_care_position,
+        format: info.format || "slide_deck",
+        variant_pages: info.variant_pages
+      };
+    });
+
+    // 複数対象が選ばれた場合の重複排除済みページ一覧（生成順の目安）
+    var mergedVariantPages = [];
+    variants.forEach(function(v){
+      v.variant_pages.forEach(function(p){
+        if (mergedVariantPages.indexOf(p) === -1) mergedVariantPages.push(p);
+      });
+    });
 
     return {
       meta: {
         title: $("title").value.trim(),
         date: $("date").value || "",
         duration_min: Number($("duration").value),
-        audience: audienceKey,
+        audience: audienceKeys,
         template: $("template").value,
         generated_at: new Date().toISOString()
       },
@@ -444,11 +477,9 @@
           "締めの呼びかけ（SNSフォロー）"
         ],
         layer2_audience_variant: {
-          audience_type: audienceKey,
-          audience_label: audienceInfo.label,
-          duty_of_care_position: audienceInfo.duty_of_care_position,
-          format: audienceInfo.format || "slide_deck",
-          variant_pages: audienceInfo.variant_pages,
+          audience_types: audienceKeys,
+          variants: variants,
+          merged_variant_pages: mergedVariantPages,
           status: status()
         },
         layer3_region_variant: {
@@ -520,6 +551,13 @@
 
   $("gen").addEventListener("click", generate);
 
+  function setAudienceChecks(values){
+    var boxes = document.querySelectorAll('input[name="audience"]');
+    for (var i=0; i<boxes.length; i++){
+      boxes[i].checked = values.indexOf(boxes[i].value) !== -1;
+    }
+  }
+
   $("sample").addEventListener("click", function(){
     $("title").value="保育施設のための地震・津波対応 減災講演";
     $("date").value="";
@@ -528,7 +566,7 @@
     $("city").value="静岡市葵区";
     $("venue").value="静岡市民文化ホール";
     $("address").value="静岡県静岡市葵区追手町1-1";
-    $("audience").value="childcare";
+    setAudienceChecks(["childcare"]);
     $("template").value="kids";
     $("buildingName").value="静岡市民文化ホール";
     $("sponsorName").value="";
@@ -537,7 +575,7 @@
 
   $("clear").addEventListener("click", function(){
     ["title","date","pref","city","venue","address","buildingName","sponsorName"].forEach(function(id){$(id).value="";});
-    $("duration").value="60"; $("audience").value="childcare"; $("template").value="standard";
+    $("duration").value="60"; setAudienceChecks(["general"]); $("template").value="standard";
     $("err").textContent="";
     $("output").innerHTML='<div class="empty">左のフォームを入力し「調査JSONを生成」を押すと、ここに防災データ構造のドラフトが表示されます。</div>';
     $("outActions").style.display="none";
