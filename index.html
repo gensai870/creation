@@ -213,12 +213,17 @@
 
       <div class="row2">
         <div>
-          <label>対象</label>
+          <label>対象（audience_variant）</label>
           <select id="audience">
-            <option value="保育士">保育士</option>
-            <option value="学校">学校</option>
-            <option value="一般" selected>一般</option>
-            <option value="行政">行政</option>
+            <option value="childcare" selected>保育者（保育士・幼稚園教諭）</option>
+            <option value="teacher">教員（小中高）</option>
+            <option value="student">学生（事前学習シート形式）</option>
+            <option value="parent">保護者</option>
+            <option value="corporate">企業（BCP特化）</option>
+            <option value="construction">建設業</option>
+            <option value="assembly">議会・行政</option>
+            <option value="special_needs">特別支援学校</option>
+            <option value="general">一般</option>
           </select>
         </div>
         <div>
@@ -230,6 +235,18 @@
           </select>
         </div>
       </div>
+
+      <div class="row2">
+        <div>
+          <label>施設・建物名（venue_specific 任意）</label>
+          <input id="buildingName" placeholder="例：◯◯保育園、◯◯文化センター" />
+        </div>
+        <div>
+          <label>発注元・主催団体（sponsor_case 任意）</label>
+          <input id="sponsorName" placeholder="例：◯◯株式会社、◯◯市PTA連合会" />
+        </div>
+      </div>
+      <p class="hint">施設・建物名を入れると、会場固有の被害想定ページ（venue_specific）が生成対象に含まれます。発注元を入れると、その団体の取組み紹介ページ（sponsor_case）が任意生成対象になります。</p>
 
       <div class="err" id="err"></div>
 
@@ -297,14 +314,98 @@
 (function(){
   var $ = function(id){return document.getElementById(id);};
 
+  // ── LAYER 2: 対象者ごとの理論パート構成（過去資料の横断分析から確定）──
+  // 各audience_typeごとに「共通コア以外で追加/並び替えされる理論パート」を定義
+  var AUDIENCE_VARIANT_MAP = {
+    childcare: {
+      label: "保育者",
+      variant_pages: [
+        "幼児段階における防災教育目標（文科省引用）",
+        "避難訓練1.0→2.0比較表（保育者/子ども関係で説明）"
+      ],
+      duty_of_care_position: "end" // 安全配慮義務は最後
+    },
+    teacher: {
+      label: "教員",
+      variant_pages: [
+        "先生が正しい防災教育を習っていない問題提起",
+        "安全配慮義務違反（予見可能性・結果回避可能性）",
+        "リスクと安全の定義（ISO/IECガイド51）"
+      ],
+      duty_of_care_position: "start" // 安全配慮義務は冒頭
+    },
+    student: {
+      label: "学生",
+      variant_pages: [
+        "事前学習シート（想定地震調査ワーク）",
+        "出身地の地域防災計画を調べるワーク"
+      ],
+      duty_of_care_position: "none",
+      format: "worksheet" // スライドでなく事前学習シート形式
+    },
+    parent: {
+      label: "保護者",
+      variant_pages: [
+        "震災遺児・孤児数データ（阪神・淡路／東日本大震災）※情緒フック",
+        "子どもと一緒に生き残るという視点",
+        "親の成長が子どもを守るというクロージング"
+      ],
+      duty_of_care_position: "none"
+    },
+    corporate: {
+      label: "企業",
+      variant_pages: [
+        "BCPとは何か（Business Continuity Plan）",
+        "関連倒産件数・事業復旧許容限界ライン",
+        "経営層/管理職/一般職ごとの温度差データ",
+        "事業継続断念ラインのグラフ"
+      ],
+      duty_of_care_position: "none"
+    },
+    construction: {
+      label: "建設業",
+      variant_pages: [
+        "◯◯の守り手というブランディング導入",
+        "業界の人材不足データ（就きたくない業種ワースト等）",
+        "sponsor_case: 発注元企業の取組み事例紹介"
+      ],
+      duty_of_care_position: "none"
+    },
+    assembly: {
+      label: "議会・行政",
+      variant_pages: [
+        "議場・庁舎の耐震年数と会議中訓練シナリオ",
+        "先生へのアンケート結果（防災教育の課題データ）"
+      ],
+      duty_of_care_position: "none"
+    },
+    special_needs: {
+      label: "特別支援学校",
+      variant_pages: [
+        "対象施設の津波浸水想定の明記（有無を強調）"
+      ],
+      duty_of_care_position: "end"
+    },
+    general: {
+      label: "一般",
+      variant_pages: [],
+      duty_of_care_position: "end"
+    }
+  };
+
   function buildJSON(){
     var status = function(){return {state:"draft", needs_review:true};};
+    var audienceKey = $("audience").value;
+    var audienceInfo = AUDIENCE_VARIANT_MAP[audienceKey] || AUDIENCE_VARIANT_MAP.general;
+    var buildingName = $("buildingName").value.trim();
+    var sponsorName = $("sponsorName").value.trim();
+
     return {
       meta: {
         title: $("title").value.trim(),
         date: $("date").value || "",
         duration_min: Number($("duration").value),
-        audience: $("audience").value,
+        audience: audienceKey,
         template: $("template").value,
         generated_at: new Date().toISOString()
       },
@@ -328,9 +429,51 @@
         routes: { official: [], reference: [] },
         status: status()
       },
+      // ── 3レイヤー・スライド差し替え計画 ──
+      slide_plan: {
+        layer1_common_core: [
+          "表紙（防災体験（案）＋地域減災力向上プロジェクト in ○○）",
+          "実績紹介（講演件数・参加者数）",
+          "メディア掲載実績",
+          "突然ですが訓練です（模擬訓練コーナー）",
+          "天井崩落被害事例（熊本地震・能登半島地震・宇和島市）",
+          "4つの力モデル（予測力・認知力・判断力・行動力）",
+          "避難訓練1.0 vs 2.0比較表",
+          "だんごむしポーズ批判",
+          "YURETA体験・地震発生時基本行動4ステップ",
+          "締めの呼びかけ（SNSフォロー）"
+        ],
+        layer2_audience_variant: {
+          audience_type: audienceKey,
+          audience_label: audienceInfo.label,
+          duty_of_care_position: audienceInfo.duty_of_care_position,
+          format: audienceInfo.format || "slide_deck",
+          variant_pages: audienceInfo.variant_pages,
+          status: status()
+        },
+        layer3_region_variant: {
+          region_earthquake: { content: "", source: "", status: status() },
+          region_damage:     { content: "", source: "", status: status() },
+          region_hazardmap:  { image_ref: "", source: "", status: status(), note: "J-SHIS/県防災マップは自動取得不可。手動スクショが必要" },
+          region_strategy:   { content: "", source: "", status: status() },
+          venue_specific: {
+            enabled: !!buildingName,
+            building_name: buildingName,
+            building_year: "",
+            seismic_measures: "",
+            status: status()
+          },
+          sponsor_case: {
+            enabled: !!sponsorName,
+            sponsor_name: sponsorName,
+            case_study_summary: "",
+            status: status()
+          }
+        }
+      },
       sources: [],
       review: {
-        required: ["earthquake.max_intensity","tsunami","nearest_shelters","routes","sources"],
+        required: ["earthquake.max_intensity","tsunami","nearest_shelters","routes","sources","slide_plan.layer3_region_variant"],
         approved_by: null,
         approved_at: null
       },
@@ -385,14 +528,16 @@
     $("city").value="静岡市葵区";
     $("venue").value="静岡市民文化ホール";
     $("address").value="静岡県静岡市葵区追手町1-1";
-    $("audience").value="保育士";
+    $("audience").value="childcare";
     $("template").value="kids";
+    $("buildingName").value="静岡市民文化ホール";
+    $("sponsorName").value="";
     $("err").textContent="";
   });
 
   $("clear").addEventListener("click", function(){
-    ["title","date","pref","city","venue","address"].forEach(function(id){$(id).value="";});
-    $("duration").value="60"; $("audience").value="一般"; $("template").value="standard";
+    ["title","date","pref","city","venue","address","buildingName","sponsorName"].forEach(function(id){$(id).value="";});
+    $("duration").value="60"; $("audience").value="childcare"; $("template").value="standard";
     $("err").textContent="";
     $("output").innerHTML='<div class="empty">左のフォームを入力し「調査JSONを生成」を押すと、ここに防災データ構造のドラフトが表示されます。</div>';
     $("outActions").style.display="none";
