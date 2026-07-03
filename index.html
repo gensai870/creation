@@ -293,7 +293,11 @@
       <div class="actions" id="outActions" style="display:none">
         <button id="copy">JSONをコピー</button>
         <button class="ghost" id="download">.json を保存</button>
+        <button class="ghost" id="copyPrompt">Claude用プロンプトをコピー</button>
       </div>
+      <p class="hint" id="promptHint" style="display:none">
+        コピーしたプロンプトを新しいClaudeのチャットに貼ってください。ベーステンプレート（disaster_deck_base_template.pptx）の <code>{{...}}</code> 箇所を埋める文章が返ってきます。震度・被害想定・出典など <b>needs_review</b> の項目は必ず人が確認してからPowerPointに貼り付けてください。
+      </p>
 
       <!-- 最新チェックパネル -->
       <div id="freshnessWrap" style="display:none">
@@ -546,6 +550,7 @@
     lastJSON = buildJSON();
     $("output").innerHTML = '<pre>'+highlight(lastJSON)+'</pre>';
     $("outActions").style.display="flex";
+    $("promptHint").style.display="block";
     $("output").scrollIntoView({behavior:"smooth", block:"nearest"});
   }
 
@@ -579,6 +584,7 @@
     $("err").textContent="";
     $("output").innerHTML='<div class="empty">左のフォームを入力し「調査JSONを生成」を押すと、ここに防災データ構造のドラフトが表示されます。</div>';
     $("outActions").style.display="none";
+    $("promptHint").style.display="none";
     lastJSON=null;
   });
 
@@ -598,6 +604,64 @@
     var slug=($("city").value.trim()||"deck").replace(/\s+/g,"_");
     a.href=url; a.download="disaster_deck_"+slug+".json"; a.click();
     URL.revokeObjectURL(url);
+  });
+
+  // ── Claude用プロンプト生成（パターンB：半自動フロー）──────────
+  function buildPrompt(json){
+    var sp = json.slide_plan;
+    var lines = [];
+    lines.push("あなたは減災教育普及協会の講演スライド作成アシスタントです。");
+    lines.push("以下のJSONは「disaster_deck_base_template.pptx」というベーステンプレートに対応した講演情報のドラフトです。");
+    lines.push("このテンプレートには {{...}} という差し替え用プレースホルダーが入ったスライドがあります。");
+    lines.push("以下のプレースホルダーそれぞれについて、実際にスライドに入れる文章を作成してください。");
+    lines.push("");
+    lines.push("【厳守事項】");
+    lines.push("・震度／被害想定／ハザードマップ／自治体の防災計画に関する数値や事実は、必ずWeb検索等で一次情報を確認し、出典URLを明記すること。");
+    lines.push("・確認が取れない・断定できない数値は、断定せず「要確認」と明記すること。数値の捏造は絶対にしないこと。");
+    lines.push("・出力は下記のプレースホルダー名をそのまま見出しにして、その下に差し替え用テキストのみを書く形式にすること。");
+    lines.push("");
+    lines.push("【講演情報（JSON）】");
+    lines.push(JSON.stringify(json, null, 2));
+    lines.push("");
+    lines.push("【埋めてほしいプレースホルダー一覧】");
+    lines.push("- {{REGION_NAME}} … 地域名（" + (json.location.city || json.location.prefecture || "") + "）");
+    lines.push("- {{AUDIENCE_LABEL_LIST}} … 対象者の表示名（" + sp.layer2_audience_variant.variants.map(function(v){return v.audience_label;}).join("／") + "）");
+    lines.push("- {{DATE}} / {{VENUE_NAME}} … 開催日・会場名");
+    lines.push("- {{LECTURES}} / {{PARTICIPANTS}} / {{PREFECTURES}} … 最新の活動実績数値（要確認）");
+    lines.push("- {{REGION_EARTHQUAKE_CONTENT}} … 想定されている地震（layer3_region_variant.region_earthquake）");
+    lines.push("- {{REGION_DAMAGE_CONTENT}} … 想定される被害（region_damage）");
+    lines.push("- {{REGION_HAZARDMAP_IMAGE}} … ハザードマップの案内文（画像自体は人が別途スクショで貼付）");
+    lines.push("- {{REGION_STRATEGY_CONTENT}} … 自治体の地震戦略・行動計画（region_strategy）");
+    if (sp.layer3_region_variant.venue_specific.enabled){
+      lines.push("- {{VENUE_NAME}} / {{VENUE_SPECIFIC_CONTENT}} … 会場固有の被害想定（会場名："+sp.layer3_region_variant.venue_specific.building_name+"）");
+    } else {
+      lines.push("- venue_specificスライドは今回対象外のため、その1枚ごとPowerPoint側で削除してください。");
+    }
+    if (sp.layer3_region_variant.sponsor_case.enabled){
+      lines.push("- {{SPONSOR_NAME}} / {{SPONSOR_CASE_CONTENT}} … 発注元の取組み事例（発注元："+sp.layer3_region_variant.sponsor_case.sponsor_name+"）");
+    } else {
+      lines.push("- sponsor_caseスライドは今回対象外のため、その1枚ごとPowerPoint側で削除してください。");
+    }
+    sp.layer2_audience_variant.merged_variant_pages.forEach(function(p, i){
+      var n = i+1;
+      lines.push("- {{AUDIENCE_VARIANT_TITLE_"+n+"}} / {{AUDIENCE_VARIANT_BODY_"+n+"}} … "+p);
+    });
+    if (sp.layer2_audience_variant.merged_variant_pages.length > 3){
+      lines.push("  ※ 対象者の理論パートが4件以上あるため、テンプレートのAUDIENCE VARIANTスライドを複製して追加してください。");
+    } else if (sp.layer2_audience_variant.merged_variant_pages.length < 3){
+      lines.push("  ※ 使わないAUDIENCE VARIANTスライドはPowerPoint側で削除してください。");
+    }
+    lines.push("");
+    lines.push("出力が終わったら、PowerPointで disaster_deck_base_template.pptx を開き、Ctrl+H（置換）で各 {{...}} を該当テキストに差し替えてください。");
+    return lines.join("\n");
+  }
+
+  $("copyPrompt").addEventListener("click", function(){
+    if(!lastJSON) return;
+    var t = buildPrompt(lastJSON);
+    navigator.clipboard.writeText(t).then(function(){
+      var b=$("copyPrompt"); var o=b.textContent; b.textContent="コピーしました"; setTimeout(function(){b.textContent=o;},1400);
+    });
   });
 
   // ── 最新チェック（Claude API）──────────────────────────────
